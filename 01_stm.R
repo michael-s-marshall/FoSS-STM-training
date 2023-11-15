@@ -148,11 +148,14 @@ k_search_results <- searchK(
   documents = hs_dfm_stm$documents,
   vocab = hs_dfm_stm$vocab,
   data = hs_dfm_stm$meta,
-  K = c(5, 10, 15, 20),
+  K = c(5:20),
   prevalence = ~s(year_c) + quant + united_kingdom + united_states
 )
 end_time <- Sys.time()
-end_time - start_time
+end_time - start_time # 27 mins
+
+# saveRDS(k_search_results, file = "k_search_results.RDS")
+# k_search_results <- readRDS("k_search_results.RDS")
 
 k_search_results[["results"]] %>% 
   map_df(as_vector) %>% 
@@ -168,32 +171,41 @@ stm_k <- stm(
   documents = hs_dfm_stm$documents,
   vocab = hs_dfm_stm$vocab,
   data = hs_dfm_stm$meta,
-  K = 10,
+  K = 11,
   prevalence = ~s(year_c) + quant + united_kingdom + united_states,
   init.type = "Spectral"
 )
 
 labelTopics(stm_k)
-plot(stm_k)
 
+findThoughts(stm_k, texts = df$Abstract, topics = 1, n = 5)
 
-
-# 1. Homeownership and tenure change
-# 2. PRS, renting and housing stress
-# 3. Gentrification, regeneration and urban renewal
-# 4. Residential mobility and segregation
-# 5. Experiences of homelessness and marginalised communities
+# 1. Ownership regimes
+# 2. Private renting
+# 3. Mixed communities
+# 4. Migration and minority ethnic groups
+# 5. Housing experiences of marginalised communities
 # 6. Families and household interventions
-# 7. Finance, real estate and mortgage markets
-# 8. Spatial dynamics, neighbourhood change and housing submarkets
+# 7. Homeownership and mortgage markets
+# 8. Housing submarkets and neighbourhood change
+# 9. Homelessness and rough sleeping
+# 10. Financialisation, financial markets and investment
+# 11. Critical urban planning and inequalities
 
-# saving data -------------------------------------------------
+# summarising estimate effect -------------------------------------------
 
-save(scopus, file = "working/lss/scopus.Rdata")
+hs_effect <- estimateEffect(
+  formula = ~s(year_c) + quant + united_kingdom + united_states,
+  stmobj = stm_k, 
+  metadata = df
+  )
 
-save(k_search_results, file = "working/stm/k_search_results.Rdata")
+summary(hs_effect)
 
-write.csv(stm_probs, "working/stm/20230531_stm_k_probs.csv")
+# plotting estimate effect: US ---------------------------------------
 
-save(stm_k, file = "working/stm/stm_k.Rdata")
+# plotting estimate effect: UK ------------------------------------------
 
+# plotting estimate effect: year ----------------------------------------
+
+# validating topics -----------------------------------------------------
