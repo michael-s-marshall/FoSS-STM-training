@@ -1,119 +1,182 @@
-pacman::p_load(tidyverse, lubridate, rscopus,
-               quanteda, tidytext, stm, wordcloud, widyr,
-               SnowballC, text2vec, rvest)
+# loading packages and data --------------------------------------------
+
+# devtools::install_github("mikajoh/tidystm", dependencies = TRUE)
+pacman::p_load(tidyverse, lubridate, quanteda, tidytext, stm, tidystm)
 
 rm(list = ls())
 
-load("working/stm/scopus.Rdata")
-load("working/stm/my_stops.Rdata")
+df <- read_csv("housing_scopus.csv", na = c("","NA"))
 
-# scraping country names from web -----------------------------------
+# inspecting data -------------------------------------------------------------
 
-countries_page <- read_html("https://www.worldometers.info/geography/alphabetical-list-of-countries/")
-country_names <- countries_page %>%
-  html_nodes(".content-inner") %>% 
-  html_text() %>% 
-  str_extract_all("Afghan.+") %>% 
-  str_replace_all("[^-[:^punct:]]|[:digit:]", "\n") %>%
-  as_tibble() %>% 
-  tidytext::unnest_tokens(word, value, token = "lines") %>%
-  mutate(word = str_trim(word),
-         word = str_replace_all(word, "united states of america","united states")) %>% 
-  filter(str_length(word) >= 1)
+# column names
+names(df)
 
-manuals <- tibble(
-  word = c("hong kong", "taiwan", "macau")
-)
+# NAs
+df %>% 
+  map_int(~sum(is.na(.)))
 
-country_names <- bind_rows(country_names, manuals)
+# variable type
+df %>% map_chr(class)
 
-# scopus data, making covariates ---------------------------------------------
+# number of quantitative papers
+df %>% 
+  count(quant) %>% 
+  mutate(percent = n / sum(n))
 
-scopus <- scopus %>% 
+# creating covariates  ----------------------------------------------------
+
+df <- df %>% 
   mutate(
-    country = Affiliations %>%
-      str_to_lower() %>%
-      str_extract(str_c(country_names$word, collapse = "|")) %>% 
-      as_factor(),
-    Year = parse_integer(as.character(Year)),
+    # UK author
+    united_kingdom = ifelse(str_detect(Affiliations,"United Kingdom"), 1, 0),
+    # US author
+    united_states = ifelse(str_detect(Affiliations,"United States"), 1, 0),
+    # Year centered
     year_c = Year - min(Year)
   ) %>% 
-  filter(!is.na(country))
+  filter(!is.na(quant) & !is.na(united_kingdom)) # removing NAs in covariates
 
-# stm ---------------------------------------------------------------
+# looking at high frequency words ---------------------------------------------
 
-scopus_corpus <- corpus(
-  scopus,
-  docid_field = "EID",
-  text_field = "abstract_clean"
-)
+df %>% 
+  unnest_tokens(word, Abstract) %>% 
+  anti_join(stop_words, by = "word") %>% 
+  select(word, everything()) %>% 
+  count(word) %>% 
+  slice_max(order_by = n, n = 30) %>% 
+  ggplot(aes(x = n, y = fct_reorder(word, n))) +
+  geom_col() +
+  labs(y = NULL)
 
-quanteda_toks <- tokens(scopus_corpus, 
-                        remove_numbers = T,
-                        remove_punct = T) %>% 
+df %>% 
+  corpus(text_field = "Abstract") %>% 
+  tokens() %>% 
+  kwic(pattern = "taylor", window = 10)
+
+publishing_string <- "Published by Informa UK Limited, trading as Taylor & Francis Group.|Informa UK Limited, trading as Taylor & Francis Group.|Taylor & Francis Group"
+
+# replotting
+tidy_tokens <- df %>% 
+  mutate(Abstract = str_remove_all(Abstract, publishing_string)) %>% 
+  unnest_tokens(word, Abstract) %>% 
+  anti_join(stop_words, by = "word") %>% 
+  select(word, everything())
+
+tidy_tokens %>% 
+  count(word) %>% 
+  slice_max(order_by = n, n = 30) %>% 
+  ggplot(aes(x = n, y = fct_reorder(word, n))) +
+  geom_col() +
+  labs(y = NULL)
+
+# tf-idf according to covariates --------------------------------------
+
+tidy_tokens %>% 
+  group_by(quant, word) %>% 
+  summarise(n = n()) %>% 
+  bind_tf_idf(word, quant, n) %>% 
+  slice_max(order_by = tf_idf, n = 25) %>% 
+  ggplot(aes(x = tf_idf, y = fct_reorder(word, tf_idf))) +
+  geom_col() +
+  facet_wrap(~quant, scales = "free")  +
+  labs(y = NULL, title = "Quantitative papers")
+
+tidy_tokens %>% 
+  group_by(united_kingdom, word) %>% 
+  summarise(n = n()) %>% 
+  bind_tf_idf(word, united_kingdom, n) %>% 
+  slice_max(order_by = tf_idf, n = 25) %>% 
+  ggplot(aes(x = tf_idf, y = fct_reorder(word, tf_idf))) +
+  geom_col() +
+  facet_wrap(~united_kingdom, scales = "free")  +
+  labs(y = NULL, title = "United Kingdom")
+
+tidy_tokens %>% 
+  group_by(united_states, word) %>% 
+  summarise(n = n()) %>% 
+  bind_tf_idf(word, united_states, n) %>% 
+  slice_max(order_by = tf_idf, n = 25) %>% 
+  ggplot(aes(x = tf_idf, y = fct_reorder(word, tf_idf))) +
+  geom_col() +
+  facet_wrap(~united_states, scales = "free")  +
+  labs(y = NULL, title = "United States")
+
+# making corpus and dfm -------------------------------------------------------
+
+df <- df %>% 
+  mutate(Abstract = str_remove_all(Abstract, publishing_string),
+         Abstract = str_remove_all(Abstract, "[:digit:]|[:punct:]|\\u00AE|\\u00a9|\\u2122"))
+
+my_stops <- c("taylor", "francis", "article", "published", "author", "uk",
+              "trading", "group", "informa", "housing", "home", "house",
+              "copyright", "paper", "abstract", "limited", "social", "policy")
+
+# corpus
+hs_corpus <- df %>% 
+  corpus(docid_field = "EID",
+         text_field = "Abstract")
+
+# tokens 
+hs_tokens <- hs_corpus %>% 
+  tokens(remove_punct = TRUE, remove_symbols = TRUE, remove_numbers = TRUE) %>% 
   tokens_tolower() %>% 
-  tokens_remove(c(stopwords("en"), my_stops$word))
+  tokens_remove(pattern = c(stopwords("en"), my_stops))
 
-scopus_dfm <- dfm(quanteda_toks)
+# compound tokens
+compounds <- list(c("universal", "credit"),
+                  c("welfare", "reform"),
+                  c("housing", "first"),
+                  c("european", "union"),
+                  c("private","rented","sector"))
+hs_tokens <- hs_tokens %>% 
+  tokens_compound(pattern = compounds)
+
+# document feature matrix
+hs_dfm <- dfm(hs_tokens)
 
 # stm k search -------------------------------------------------------------------
 
-scopus_dfm_stm <- quanteda::convert(scopus_dfm,
-                                    to = "stm",
-                                    docvars = docvars(scopus_dfm))
+# converting to an STM object
+hs_dfm_stm <- convert(hs_dfm,
+                      to = "stm",
+                      docvars = docvars(hs_dfm))
 
 set.seed(123)
 start_time <- Sys.time()
 k_search_results <- searchK(
-  documents = scopus_dfm_stm$documents,
-  vocab = scopus_dfm_stm$vocab,
-  data = scopus_dfm_stm$meta,
-  K = c(5:20),
-  prevalence = ~s(Year) + country
+  documents = hs_dfm_stm$documents,
+  vocab = hs_dfm_stm$vocab,
+  data = hs_dfm_stm$meta,
+  K = c(5, 10, 15, 20),
+  prevalence = ~s(year_c) + quant + united_kingdom + united_states
 )
 end_time <- Sys.time()
 end_time - start_time
 
-k_results <- k_search_results$results %>% 
-  map_df(as_vector)
-
-scaling <- function(x){
-  xmin <- min(x)
-  xmax <- max(x)
-  (x - xmin)/(xmax - xmin)
-}
-
-best_k <- k_results$K[which.max(scaling(k_results$exclus) +
-                                  scaling(k_results$semcoh))]
-best_k 
-
-k_results %>% 
+k_search_results[["results"]] %>% 
+  map_df(as_vector) %>% 
   ggplot(aes(label = as.character(K),
              x = exclus,
              y = semcoh)) +
-  geom_text() +
-  geom_smooth(method = "lm", se = F)
+  geom_text()
 
 # STM --------------------------------------------------------------------
 
 set.seed(123)
 stm_k <- stm(
-  documents = scopus_dfm_stm$documents,
-  vocab = scopus_dfm_stm$vocab,
-  data = scopus_dfm_stm$meta,
-  K = best_k,
-  prevalence = ~s(Year) + country,
+  documents = hs_dfm_stm$documents,
+  vocab = hs_dfm_stm$vocab,
+  data = hs_dfm_stm$meta,
+  K = 10,
+  prevalence = ~s(year_c) + quant + united_kingdom + united_states,
   init.type = "Spectral"
 )
 
 labelTopics(stm_k)
 plot(stm_k)
 
-stm_probs <- bind_cols(
-  scopus,
-  make.dt(stm_k) %>%
-    as_tibble()
-)
+
 
 # 1. Homeownership and tenure change
 # 2. PRS, renting and housing stress
