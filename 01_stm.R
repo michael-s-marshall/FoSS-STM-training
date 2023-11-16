@@ -1,7 +1,7 @@
 # loading packages and data --------------------------------------------
 
 # devtools::install_github("mikajoh/tidystm", dependencies = TRUE)
-pacman::p_load(tidyverse, lubridate, quanteda, tidytext, stm, tidystm)
+pacman::p_load(tidyverse, lubridate, quanteda, tidytext, stm, tidystm, igraph, ggstance)
 
 rm(list = ls())
 
@@ -106,6 +106,7 @@ tidy_tokens %>%
 
 df <- df %>% 
   mutate(Abstract = str_remove_all(Abstract, publishing_string),
+         Abstract = str_replace_all(Abstract, "-", " "),
          Abstract = str_remove_all(Abstract, "[:digit:]|[:punct:]|\\u00AE|\\u00a9|\\u2122"))
 
 my_stops <- c("taylor", "francis", "article", "published", "author", "uk",
@@ -152,10 +153,12 @@ k_search_results <- searchK(
   prevalence = ~s(year_c) + quant + united_kingdom + united_states
 )
 end_time <- Sys.time()
-end_time - start_time # 27 mins
+end_time - start_time # 25 mins
 
 # saveRDS(k_search_results, file = "k_search_results.RDS")
 # k_search_results <- readRDS("k_search_results.RDS")
+
+plot(k_search_results)
 
 k_search_results[["results"]] %>% 
   map_df(as_vector) %>% 
@@ -176,21 +179,46 @@ stm_k <- stm(
   init.type = "Spectral"
 )
 
+# inspecting topics ---------------------------------------------------
+
+# words associated with topics
 labelTopics(stm_k)
 
-findThoughts(stm_k, texts = df$Abstract, topics = 1, n = 5)
+# top 20 probability words
+topic_words <- labelTopics(stm_k, n = 20)
+topic_words$prob %>% 
+  t() %>% 
+  as_tibble() %>% 
+  map(str_c, collapse = "; ")
 
-# 1. Ownership regimes
-# 2. Private renting
-# 3. Mixed communities
-# 4. Migration and minority ethnic groups
-# 5. Housing experiences of marginalised communities
-# 6. Families and household interventions
-# 7. Homeownership and mortgage markets
-# 8. Housing submarkets and neighbourhood change
-# 9. Homelessness and rough sleeping
-# 10. Financialisation, financial markets and investment
-# 11. Critical urban planning and inequalities
+# top 20 frex words
+topic_words$frex %>% 
+  t() %>% 
+  as_tibble() %>% 
+  map(str_c, collapse = "; ")
+
+# top probability documents by topic
+for(i in 1:11){
+  print(findThoughts(stm_k, texts = df$Abstract, topics = i, n = 5))
+}
+
+# naming topics based on researcher interpretation
+topic_names <- tibble(
+  topic = seq(1,11,1),
+  topic_name = c(
+    "Ownership and welfare regimes",
+    "Housing supply and demand",
+    "Low income households and poverty",
+    "Regeneration and mixed communities",
+    "Migration, global South and minority ethnic groups",
+    "Housing submarkets and neighbourhood change",
+    "Critical urban studies and inequalities",
+    "Mortgage markets and borrowing",
+    "Families and household interventions",
+    "Social housing funding and governance",
+    "Homelessness and marginalised communities"
+  )
+)
 
 # summarising estimate effect -------------------------------------------
 
@@ -202,10 +230,60 @@ hs_effect <- estimateEffect(
 
 summary(hs_effect)
 
-# plotting estimate effect: US ---------------------------------------
+# plotting estimate effect: UK ---------------------------------------
 
-# plotting estimate effect: UK ------------------------------------------
+# extracting estimate effect with tidystm
+uk_effect <- extract.estimateEffect(hs_effect, covariate = "united_kingdom",
+                                    model = stm_k, method = "difference",
+                                    cov.value1 = "1",
+                                    cov.value2 = "0") %>% 
+  left_join(topic_names, by = "topic")
+
+uk_effect
+
+uk_effect %>% 
+  ggplot(aes(x = estimate, y = fct_reorder(topic_name, topic))) +
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 1.5, 
+             colour = "lightgrey") +
+  geom_point(size = 2) +
+  geom_linerangeh(aes(xmin = ci.lower, xmax = ci.upper)) +
+  labs(x = "Not UK     ......     UK", y = NULL) +
+  theme_bw() +
+  theme(axis.title.x = element_text(hjust = 0.45))
+
+# plotting estimate effect: US ------------------------------------------
+
+us_effect <- extract.estimateEffect(hs_effect, covariate = "united_states",
+                                    model = stm_k, method = "difference",
+                                    cov.value1 = "1",
+                                    cov.value2 = "0") %>% 
+  left_join(topic_names, by = "topic")
+
+us_effect %>% 
+  ggplot(aes(x = estimate, y = fct_reorder(topic_name, topic))) +
+  geom_vline(xintercept = 0, linetype = "dashed", linewidth = 1.5, 
+             colour = "lightgrey") +
+  geom_point(size = 2) +
+  geom_linerangeh(aes(xmin = ci.lower, xmax = ci.upper)) +
+  labs(x = "Not US     ......     US", y = NULL) +
+  theme_bw() +
+  theme(axis.title.x = element_text(hjust = 0.30))
 
 # plotting estimate effect: year ----------------------------------------
 
-# validating topics -----------------------------------------------------
+year_effect <- extract.estimateEffect(hs_effect, covariate = "year_c",
+                                      model = stm_k, method = "pointestimate") %>% 
+  left_join(topic_names, by = "topic")
+
+head(year_effect, 30)
+
+year_effect %>% 
+  ggplot(aes(x = covariate.value, y = estimate)) +
+  geom_line(linewidth = 1.5) +
+  geom_ribbon(aes(ymin = ci.lower, ymax = ci.upper), fill = "lightgrey",
+              alpha = 0.5) +
+  facet_wrap(~str_wrap(topic_name, width = 30)) +
+  scale_x_continuous(breaks = seq(0, 20, 5),
+                     labels = seq(2000, 2020 , 5)) +
+  theme_bw() +
+  labs(x = "Year", y = "Topic prevalence")
