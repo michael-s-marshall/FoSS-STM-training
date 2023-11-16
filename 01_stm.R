@@ -133,6 +133,9 @@ compounds <- list(c("universal", "credit"),
 hs_tokens <- hs_tokens %>% 
   tokens_compound(pattern = compounds)
 
+hs_tokens %>% 
+  kwic(pattern = "welfare_reform")
+
 # document feature matrix
 hs_dfm <- dfm(hs_tokens)
 
@@ -186,21 +189,23 @@ labelTopics(stm_k)
 
 # top 20 probability words
 topic_words <- labelTopics(stm_k, n = 20)
-topic_words$prob %>% 
-  t() %>% 
-  as_tibble() %>% 
-  map(str_c, collapse = "; ")
+topic_words[["prob"]] %>% 
+  apply(1, str_c, collapse = "; ")
 
 # top 20 frex words
-topic_words$frex %>% 
-  t() %>% 
-  as_tibble() %>% 
-  map(str_c, collapse = "; ")
-
+topic_words[["frex"]] %>% 
+  apply(1, str_c, collapse = "; ")
+  
 # top probability documents by topic
+doc_list <- list()
 for(i in 1:11){
-  print(findThoughts(stm_k, texts = df$Abstract, topics = i, n = 5))
+  doc_list[[i]] <- findThoughts(stm_k, 
+                                texts = df$Abstract, 
+                                topics = i, 
+                                n = 5)
 }
+doc_list[[1]]
+doc_list
 
 # naming topics based on researcher interpretation
 topic_names <- tibble(
