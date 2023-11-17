@@ -207,6 +207,43 @@ for(i in 1:11){
 doc_list[[1]]
 doc_list
 
+# tidytext of stm result - beta matrix i.e. per-term-per-topic
+tidy_beta <- tidy(stm_k, matrix = "beta")
+
+tidy_beta %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = beta, y = term)) +
+  geom_col() +
+  facet_wrap(~topic, scales = "free") +
+  labs(y = NULL)
+
+# tidytext of stm result - theta matrix i.e. per-document-per-topic
+tidy_theta <- tidy(stm_k, matrix = "theta", document_names = df$EID)
+
+tidy_theta %>% 
+  head(20)
+
+tidy_theta %>%
+  arrange(document, topic) %>% 
+  slice_head(n = 44) %>% 
+  ggplot(aes(x = document, y = gamma, fill = as.factor(topic))) +
+  geom_col(position = "stack", colour = "black") +
+  labs(y = NULL, fill = "Topic")
+
+# let's look at that document that is a mix of topics 1, 8 and 11
+tidy_theta %>%
+  arrange(document, topic) %>% 
+  slice_head(n = 44) %>% 
+  select(document) %>% 
+  unique()
+
+# it's about gender inequalities and mortgage arrears
+df$Abstract[df$EID == "2-s2.0-0033675282"]
+
+# naming topics ----------------------------------------------------------------
+
 # naming topics based on researcher interpretation
 topic_names <- tibble(
   topic = seq(1,11,1),
