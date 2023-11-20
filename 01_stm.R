@@ -1,7 +1,7 @@
 # loading packages and data --------------------------------------------
 
 # devtools::install_github("mikajoh/tidystm", dependencies = TRUE)
-pacman::p_load(tidyverse, lubridate, quanteda, tidytext, stm, tidystm, igraph, ggstance)
+pacman::p_load(tidyverse, quanteda, tidytext, stm, tidystm, ggstance)
 
 rm(list = ls())
 
