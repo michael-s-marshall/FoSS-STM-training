@@ -34,8 +34,9 @@ df <- df %>%
     united_states = ifelse(str_detect(Affiliations,"United States"), 1, 0),
     # Year centered
     year_c = Year - min(Year)
-  ) %>% 
-  filter(!is.na(quant) & !is.na(united_kingdom)) # removing NAs in covariates
+  ) %>%
+  drop_na(quant) %>% 
+  drop_na(united_kingdom) # removing NAs in covariates
 
 # looking at high frequency words ---------------------------------------------
 
